@@ -2,29 +2,22 @@ use iced::Event;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse;
 use iced::advanced::renderer;
-use iced::advanced::text::{self, Paragraph};
+use iced::advanced::text::{self};
 use iced::advanced::widget::{Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget};
-use iced::keyboard::{self, key};
-use iced::{
-	Background, Border, Color, Element, Length, Pixels, Point, Rectangle, Shadow, Size, Vector,
-};
+use iced::keyboard;
+use iced::{Background, Border, Color, Element, Length, Point, Rectangle, Shadow, Size, Vector};
 
 use crate::colors::{BG_PRIMARY, BORDER_PRIMARY, SHADOW_PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY};
 use crate::fonts::MENU_FONT;
-use crate::menu::{MenuItem, MenuRoot};
-
-const BAR_HEIGHT: f32 = 32.0;
-const BAR_ITEM_PADDING_X: f32 = 12.0;
-const BAR_ITEM_GAP: f32 = 4.0;
-const PANEL_GAP: f32 = 2.0;
-const PANEL_PADDING: f32 = 6.0;
-const PANEL_ITEM_HEIGHT: f32 = 28.0;
-const PANEL_SEPARATOR_HEIGHT: f32 = 8.0;
-const PANEL_MIN_WIDTH: f32 = 180.0;
-const LABEL_SIZE: Pixels = Pixels(16.0);
-const PANEL_TEXT_OFFSET: f32 = 10.0;
-const ARROW_GUTTER: f32 = 24.0;
+use crate::menu::geometry::{
+	ARROW_GUTTER, BAR_ITEM_PADDING_X, Hit, ItemKind, LABEL_SIZE, MenuGeometry, PANEL_TEXT_OFFSET,
+};
+use crate::menu::interaction::{
+	WidgetState, adjacent_root, focused_panel_items, is_menu_activation, navigation_direction,
+	panel_items, selectable_item,
+};
+use crate::menu::{MenuItem, MenuRoot, MenuState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuMessage {
@@ -36,40 +29,31 @@ pub enum MenuMessage {
 	Close,
 }
 
-#[derive(Debug, Default)]
-pub struct MenuState {
-	open_root: Option<&'static str>,
-	open_path: Vec<&'static str>,
-}
-
 impl MenuState {
 	pub fn update(&mut self, message: MenuMessage) -> Option<&'static str> {
 		match message {
 			MenuMessage::ToggleRoot(id) => {
-				if self.open_root == Some(id) {
+				if self.is_root_open(id) {
 					self.close();
 				} else {
-					self.open_root = Some(id);
-					self.open_path.clear();
+					self.set_open_root(id);
 				}
 
 				None
 			}
 			MenuMessage::OpenRoot(id) => {
-				if self.open_root != Some(id) {
-					self.open_root = Some(id);
-					self.open_path.clear();
+				if !self.is_root_open(id) {
+					self.set_open_root(id);
 				}
 
 				None
 			}
 			MenuMessage::OpenSubmenu { depth, id } => {
-				self.open_path.truncate(depth);
-				self.open_path.push(id);
+				self.set_open_submenu(depth, id);
 				None
 			}
 			MenuMessage::TrimPath(depth) => {
-				self.open_path.truncate(depth);
+				self.trim_path(depth);
 				None
 			}
 			MenuMessage::Invoke(id) => {
@@ -81,159 +65,6 @@ impl MenuState {
 				None
 			}
 		}
-	}
-
-	pub fn is_root_open(&self, id: &'static str) -> bool {
-		self.open_root == Some(id)
-	}
-
-	pub fn is_submenu_open(&self, depth: usize, id: &'static str) -> bool {
-		self.open_path.get(depth) == Some(&id)
-	}
-
-	pub fn open_root(&self) -> Option<&'static str> {
-		self.open_root
-	}
-
-	pub fn close(&mut self) {
-		self.open_root = None;
-		self.open_path.clear();
-	}
-}
-
-#[derive(Debug, Default)]
-struct WidgetState {
-	keyboard_navigation: bool,
-	focus_root: Option<&'static str>,
-	focus_path: Vec<&'static str>,
-}
-
-impl WidgetState {
-	fn clear(&mut self) {
-		self.keyboard_navigation = false;
-		self.focus_root = None;
-		self.focus_path.clear();
-	}
-
-	fn sync(&mut self, roots: &[MenuRoot], menu_state: &MenuState) {
-		let Some(open_root) = menu_state.open_root() else {
-			self.clear();
-			return;
-		};
-
-		self.focus_root = Some(open_root);
-
-		let Some(root) = root_by_id(roots, open_root) else {
-			self.clear();
-			return;
-		};
-
-		let visible_depths = menu_state.open_path.len() + 1;
-		self.focus_path.truncate(visible_depths);
-
-		let mut items = root.items;
-
-		for depth in 0..visible_depths {
-			let fallback = first_selectable(items);
-			let focused = self
-				.focus_path
-				.get(depth)
-				.copied()
-				.filter(|id| selectable_item(items, id).is_some())
-				.or(fallback);
-
-			let Some(focused) = focused else {
-				self.focus_path.truncate(depth);
-				return;
-			};
-
-			if depth < self.focus_path.len() {
-				self.focus_path[depth] = focused;
-			} else {
-				self.focus_path.push(focused);
-			}
-
-			if let Some(submenu_id) = menu_state.open_path.get(depth) {
-				let Some(next_items) = submenu_items(items, submenu_id) else {
-					self.focus_path.truncate(depth + 1);
-					return;
-				};
-
-				items = next_items;
-			}
-		}
-	}
-
-	fn focus_root_panel(&mut self, roots: &[MenuRoot], root_id: &'static str) {
-		self.keyboard_navigation = true;
-		self.focus_root = Some(root_id);
-		self.focus_path.clear();
-
-		if let Some(root) = root_by_id(roots, root_id)
-			&& let Some(first) = first_selectable(root.items)
-		{
-			self.focus_path.push(first);
-		}
-	}
-
-	fn focus_current_panel(
-		&mut self,
-		roots: &[MenuRoot],
-		menu_state: &MenuState,
-		direction: MoveDirection,
-	) -> bool {
-		self.sync(roots, menu_state);
-
-		let Some((depth, items)) = focused_panel_items(roots, menu_state, self) else {
-			return false;
-		};
-
-		let current = self.focus_path.get(depth).copied();
-		let next = match (current, direction) {
-			(Some(current), MoveDirection::Next) => next_selectable(items, current),
-			(Some(current), MoveDirection::Previous) => previous_selectable(items, current),
-			(None, _) => first_selectable(items),
-		};
-
-		let Some(next) = next else {
-			return false;
-		};
-
-		self.keyboard_navigation = true;
-
-		if depth < self.focus_path.len() {
-			self.focus_path[depth] = next;
-			self.focus_path.truncate(depth + 1);
-		} else {
-			self.focus_path.push(next);
-		}
-
-		true
-	}
-
-	fn focus_submenu(&mut self, items: &[MenuItem], depth: usize, id: &'static str) -> bool {
-		let Some(children) = submenu_items(items, id) else {
-			return false;
-		};
-
-		self.keyboard_navigation = true;
-
-		if depth < self.focus_path.len() {
-			self.focus_path[depth] = id;
-			self.focus_path.truncate(depth + 1);
-		} else {
-			self.focus_path.push(id);
-		}
-
-		if let Some(first) = first_selectable(children) {
-			self.focus_path.push(first);
-		}
-
-		true
-	}
-
-	fn focused(&self, id: &'static str, depth: usize) -> bool {
-		self.keyboard_navigation && self.focus_path.get(depth) == Some(&id)
 	}
 }
 
@@ -520,7 +351,9 @@ where
 						shell.request_redraw();
 						shell.capture_event();
 					}
-					key::Key::Named(key::Named::Escape) if self.state.open_root().is_some() => {
+					keyboard::key::Key::Named(keyboard::key::Named::Escape)
+						if self.state.open_root().is_some() =>
+					{
 						widget_state.clear();
 						shell.publish(MenuMessage::Close);
 						shell.capture_event();
@@ -542,7 +375,7 @@ where
 							shell.capture_event();
 						}
 					}
-					key::Key::Named(key::Named::ArrowRight) => {
+					keyboard::key::Key::Named(keyboard::key::Named::ArrowRight) => {
 						if let Some(open_root) = self.state.open_root() {
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
@@ -566,7 +399,7 @@ where
 							shell.capture_event();
 						}
 					}
-					key::Key::Named(key::Named::ArrowLeft) => {
+					keyboard::key::Key::Named(keyboard::key::Named::ArrowLeft) => {
 						if let Some(open_root) = self.state.open_root() {
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
@@ -587,7 +420,7 @@ where
 							shell.capture_event();
 						}
 					}
-					key::Key::Named(key::Named::Enter) => {
+					keyboard::key::Key::Named(keyboard::key::Named::Enter) => {
 						if self.state.open_root().is_some() {
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
@@ -658,273 +491,6 @@ where
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
-struct RootGeometry {
-	id: &'static str,
-	label: &'static str,
-	bounds: Rectangle,
-}
-
-#[derive(Debug)]
-struct PanelGeometry<'a> {
-	bounds: Rectangle,
-	items: Vec<ItemGeometry<'a>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ItemGeometry<'a> {
-	depth: usize,
-	bounds: Rectangle,
-	kind: ItemKind<'a>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ItemKind<'a> {
-	Action { id: &'static str, label: &'a str },
-	Submenu { id: &'static str, label: &'a str },
-	Separator,
-}
-
-#[derive(Debug)]
-struct MenuGeometry<'a> {
-	roots: Vec<RootGeometry>,
-	panels: Vec<PanelGeometry<'a>>,
-	bar_bounds: Rectangle,
-}
-
-impl<'a> MenuGeometry<'a> {
-	fn new<Renderer: text::Renderer<Font = iced::Font>>(
-		roots: &'a [MenuRoot],
-		state: &'a MenuState,
-		renderer: &Renderer,
-		width: f32,
-	) -> Self {
-		let font = renderer.default_font();
-		let line_height = text::LineHeight::default();
-
-		let mut x = 0.0;
-		let mut root_geometries = Vec::with_capacity(roots.len());
-
-		for root in roots {
-			let label_width = measure_label(renderer, root.label, font, line_height);
-			let item_width = label_width + BAR_ITEM_PADDING_X * 2.0;
-
-			root_geometries.push(RootGeometry {
-				id: root.id,
-				label: root.label,
-				bounds: Rectangle {
-					x,
-					y: 0.0,
-					width: item_width,
-					height: BAR_HEIGHT,
-				},
-			});
-
-			x += item_width + BAR_ITEM_GAP;
-		}
-
-		let bar_bounds = Rectangle {
-			x: 0.0,
-			y: 0.0,
-			width,
-			height: BAR_HEIGHT,
-		};
-
-		let mut panels = Vec::new();
-
-		if let Some(root_id) = state.open_root()
-			&& let Some((root_index, root)) = roots
-				.iter()
-				.enumerate()
-				.find(|(_, root)| root.id == root_id)
-			{
-				let anchor = root_geometries[root_index].bounds;
-				let mut current_items = root.items;
-				let mut panel_x = anchor.x;
-				let mut panel_y = BAR_HEIGHT + PANEL_GAP;
-
-				for depth in 0..=state.open_path.len() {
-					let panel = layout_panel(
-						current_items,
-						depth,
-						renderer,
-						font,
-						line_height,
-						Point::new(panel_x, panel_y),
-					);
-
-					let next_items = state.open_path.get(depth).and_then(|submenu_id| {
-						panel.items.iter().find_map(|item| match item.kind {
-							ItemKind::Submenu { id, .. } if id == *submenu_id => {
-								let child = submenu_items(current_items, id)?;
-								panel_x = item.bounds.x + item.bounds.width + PANEL_GAP;
-								panel_y = item.bounds.y;
-								Some(child)
-							}
-							_ => None,
-						})
-					});
-
-					panels.push(panel);
-
-					let Some(items) = next_items else {
-						break;
-					};
-
-					current_items = items;
-				}
-		}
-
-		Self {
-			roots: root_geometries,
-			panels,
-			bar_bounds,
-		}
-	}
-
-	fn with_origin(mut self, origin: Point) -> Self {
-		self.bar_bounds.x += origin.x;
-		self.bar_bounds.y += origin.y;
-
-		for root in &mut self.roots {
-			root.bounds.x += origin.x;
-			root.bounds.y += origin.y;
-		}
-
-		for panel in &mut self.panels {
-			panel.bounds.x += origin.x;
-			panel.bounds.y += origin.y;
-
-			for item in &mut panel.items {
-				item.bounds.x += origin.x;
-				item.bounds.y += origin.y;
-			}
-		}
-
-		self
-	}
-
-	fn size(&self) -> Size {
-		let width = self
-			.panels
-			.iter()
-			.fold(self.bar_bounds.width, |right, panel| {
-				right.max(panel.bounds.x + panel.bounds.width)
-			});
-
-		let height = self
-			.panels
-			.iter()
-			.fold(self.bar_bounds.height, |bottom, panel| {
-				bottom.max(panel.bounds.y + panel.bounds.height)
-			});
-
-		Size::new(width, height)
-	}
-
-	fn hit_test(&self, cursor: mouse::Cursor) -> Option<Hit<'a>> {
-		for root in &self.roots {
-			if cursor.is_over(root.bounds) {
-				return Some(Hit::Root(*root));
-			}
-		}
-
-		for panel in &self.panels {
-			if cursor.is_over(panel.bounds) {
-				for item in &panel.items {
-					if cursor.is_over(item.bounds) {
-						return Some(Hit::PanelItem(*item));
-					}
-				}
-
-				return Some(Hit::Panel);
-			}
-		}
-
-		None
-	}
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Hit<'a> {
-	Root(RootGeometry),
-	Panel,
-	PanelItem(ItemGeometry<'a>),
-}
-
-fn layout_panel<'a, Renderer: text::Renderer<Font = iced::Font>>(
-	items: &'a [MenuItem],
-	depth: usize,
-	renderer: &Renderer,
-	font: Renderer::Font,
-	line_height: text::LineHeight,
-	origin: Point,
-) -> PanelGeometry<'a> {
-	let mut width = PANEL_MIN_WIDTH;
-
-	for item in items {
-		let label = match item {
-			MenuItem::Action { label, .. } | MenuItem::Submenu { label, .. } => *label,
-			MenuItem::Separator => continue,
-		};
-
-		width = width.max(
-			measure_label(renderer, label, font, line_height)
-				+ PANEL_TEXT_OFFSET * 2.0
-				+ ARROW_GUTTER,
-		);
-	}
-
-	let height = items.iter().fold(PANEL_PADDING * 2.0, |height, item| {
-		height
-			+ match item {
-				MenuItem::Separator => PANEL_SEPARATOR_HEIGHT,
-				_ => PANEL_ITEM_HEIGHT,
-			}
-	});
-
-	let mut y = origin.y + PANEL_PADDING;
-	let mut geometries = Vec::with_capacity(items.len());
-
-	for item in items {
-		let item_height = match item {
-			MenuItem::Separator => PANEL_SEPARATOR_HEIGHT,
-			_ => PANEL_ITEM_HEIGHT,
-		};
-
-		let bounds = Rectangle {
-			x: origin.x + PANEL_PADDING,
-			y,
-			width: width - PANEL_PADDING * 2.0,
-			height: item_height,
-		};
-
-		let kind = match item {
-			MenuItem::Action { id, label } => ItemKind::Action { id, label },
-			MenuItem::Submenu { id, label, .. } => ItemKind::Submenu { id, label },
-			MenuItem::Separator => ItemKind::Separator,
-		};
-
-		geometries.push(ItemGeometry {
-			depth,
-			bounds,
-			kind,
-		});
-
-		y += item_height;
-	}
-
-	PanelGeometry {
-		bounds: Rectangle {
-			x: origin.x,
-			y: origin.y,
-			width,
-			height,
-		},
-		items: geometries,
-	}
-}
-
 fn draw_label<Renderer: text::Renderer<Font = iced::Font>>(
 	renderer: &mut Renderer,
 	label: &str,
@@ -960,41 +526,6 @@ fn draw_label<Renderer: text::Renderer<Font = iced::Font>>(
 		color,
 		*viewport,
 	);
-}
-
-fn measure_label<Renderer: text::Renderer<Font = iced::Font>>(
-	_renderer: &Renderer,
-	label: &str,
-	_font: Renderer::Font,
-	line_height: text::LineHeight,
-) -> f32 {
-	let paragraph = <Renderer::Paragraph as Paragraph>::with_text(text::Text {
-		content: label,
-		bounds: Size::new(
-			f32::INFINITY,
-			f32::from(line_height.to_absolute(LABEL_SIZE)),
-		),
-		size: LABEL_SIZE,
-		line_height,
-		font: MENU_FONT,
-		align_x: text::Alignment::Left,
-		align_y: iced::alignment::Vertical::Center,
-		shaping: text::Shaping::Basic,
-		wrapping: text::Wrapping::None,
-	});
-
-	paragraph.min_width().ceil()
-}
-
-fn submenu_items<'a>(items: &'a [MenuItem], id: &str) -> Option<&'a [MenuItem]> {
-	items.iter().find_map(|item| match item {
-		MenuItem::Submenu {
-			id: submenu_id,
-			items,
-			..
-		} if *submenu_id == id => Some(*items),
-		_ => None,
-	})
 }
 
 fn bar_background() -> Color {
@@ -1034,113 +565,6 @@ enum LabelAlignment {
 	Bar,
 	Panel,
 	Arrow,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum MoveDirection {
-	Next,
-	Previous,
-}
-
-fn root_by_id<'a>(roots: &'a [MenuRoot], id: &str) -> Option<&'a MenuRoot> {
-	roots.iter().find(|root| root.id == id)
-}
-
-fn panel_items<'a>(
-	roots: &'a [MenuRoot],
-	state: &'a MenuState,
-	depth: usize,
-) -> Option<&'a [MenuItem]> {
-	let root = root_by_id(roots, state.open_root()?)?;
-	let mut items = root.items;
-
-	for submenu_id in state.open_path.iter().take(depth) {
-		items = submenu_items(items, submenu_id)?;
-	}
-
-	Some(items)
-}
-
-fn focused_panel_items<'a>(
-	roots: &'a [MenuRoot],
-	state: &'a MenuState,
-	widget_state: &WidgetState,
-) -> Option<(usize, &'a [MenuItem])> {
-	let depth = widget_state.focus_path.len().checked_sub(1)?;
-	panel_items(roots, state, depth).map(|items| (depth, items))
-}
-
-fn selectable_item<'a>(items: &'a [MenuItem], id: &str) -> Option<&'a MenuItem> {
-	items.iter().find(|item| match item {
-		MenuItem::Action { id: item_id, .. } | MenuItem::Submenu { id: item_id, .. } => {
-			*item_id == id
-		}
-		MenuItem::Separator => false,
-	})
-}
-
-fn first_selectable(items: &[MenuItem]) -> Option<&'static str> {
-	items.iter().find_map(item_id)
-}
-
-fn next_selectable(items: &[MenuItem], current: &'static str) -> Option<&'static str> {
-	cycle_selectable(items, current, 1)
-}
-
-fn previous_selectable(items: &[MenuItem], current: &'static str) -> Option<&'static str> {
-	cycle_selectable(items, current, -1)
-}
-
-fn cycle_selectable(
-	items: &[MenuItem],
-	current: &'static str,
-	step: isize,
-) -> Option<&'static str> {
-	let ids: Vec<_> = items.iter().filter_map(item_id).collect();
-	let current_index = ids.iter().position(|id| *id == current)?;
-
-	if ids.is_empty() {
-		return None;
-	}
-
-	let len = ids.len() as isize;
-	let next_index = (current_index as isize + step).rem_euclid(len) as usize;
-	ids.get(next_index).copied()
-}
-
-fn item_id(item: &MenuItem) -> Option<&'static str> {
-	match item {
-		MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } => Some(*id),
-		MenuItem::Separator => None,
-	}
-}
-
-fn adjacent_root<'a>(
-	roots: &'a [MenuRoot],
-	current: &'static str,
-	offset: isize,
-) -> Option<&'a MenuRoot> {
-	let index = roots.iter().position(|root| root.id == current)?;
-	let len = roots.len() as isize;
-	let next_index = (index as isize + offset).rem_euclid(len) as usize;
-	roots.get(next_index)
-}
-
-fn is_menu_activation(key: &key::Key<&str>, modifiers: keyboard::Modifiers) -> bool {
-	modifiers.command()
-		&& modifiers.shift()
-		&& !modifiers.alt()
-		&& matches!(key, key::Key::Character("m" | "M"))
-}
-
-fn navigation_direction(key: &key::Key<&str>, shift: bool) -> Option<MoveDirection> {
-	match key {
-		key::Key::Named(key::Named::ArrowDown) => Some(MoveDirection::Next),
-		key::Key::Named(key::Named::ArrowUp) => Some(MoveDirection::Previous),
-		key::Key::Named(key::Named::Tab) if shift => Some(MoveDirection::Previous),
-		key::Key::Named(key::Named::Tab) => Some(MoveDirection::Next),
-		_ => None,
-	}
 }
 
 #[cfg(test)]

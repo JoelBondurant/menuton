@@ -1,5 +1,9 @@
 mod core;
+mod geometry;
+mod interaction;
 mod model;
+mod state;
 
-pub use core::{MenuBar, MenuMessage, MenuState};
+pub use core::{MenuBar, MenuMessage};
 pub use model::{MenuItem, MenuRoot};
+pub use state::MenuState;
