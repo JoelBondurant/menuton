@@ -1,6 +1,7 @@
 use iced::widget::{Space, column, container, row, stack, text};
 use iced::{Alignment, Element, Length, Task, Theme};
 
+use crate::fonts::{DEJAVU_SANS_MONO, MENU_FONT};
 use crate::menu::{MenuBar, MenuItem, MenuMessage, MenuRoot, MenuState};
 
 const FILE_MENU: &[MenuItem] = &[
@@ -126,6 +127,9 @@ struct Demo {
 pub fn run() -> iced::Result {
 	iced::application(|| (Demo::default(), Task::none()), update, view)
 		.title("menuton")
+		.antialiasing(true)
+		.font(DEJAVU_SANS_MONO)
+		.default_font(MENU_FONT)
 		.theme(theme)
 		.run()
 }

@@ -10,6 +10,7 @@ use iced::{
 };
 
 use crate::colors::{BG_PRIMARY, BORDER_PRIMARY, SHADOW_PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY};
+use crate::fonts::MENU_FONT;
 use crate::menu::{MenuItem, MenuRoot};
 
 const BAR_HEIGHT: f32 = 32.0;
@@ -112,7 +113,7 @@ impl<'a> MenuBar<'a> {
 
 impl<'a, Theme, Renderer> Widget<MenuMessage, Theme, Renderer> for MenuBar<'a>
 where
-	Renderer: text::Renderer,
+	Renderer: text::Renderer<Font = iced::Font>,
 {
 	fn size(&self) -> Size<Length> {
 		Size::new(Length::Fill, Length::Shrink)
@@ -239,7 +240,7 @@ where
 						if matches!(item.kind, ItemKind::Submenu { .. }) {
 							draw_label(
 								renderer,
-								">",
+								"▷",
 								Rectangle {
 									x: item.bounds.x + item.bounds.width - ARROW_GUTTER,
 									..item.bounds
@@ -380,7 +381,7 @@ where
 impl<'a, Theme, Renderer> From<MenuBar<'a>> for Element<'a, MenuMessage, Theme, Renderer>
 where
 	Theme: 'a,
-	Renderer: text::Renderer + 'a,
+	Renderer: text::Renderer<Font = iced::Font> + 'a,
 {
 	fn from(menu: MenuBar<'a>) -> Self {
 		Element::new(menu)
@@ -422,7 +423,7 @@ struct MenuGeometry<'a> {
 }
 
 impl<'a> MenuGeometry<'a> {
-	fn new<Renderer: text::Renderer>(
+	fn new<Renderer: text::Renderer<Font = iced::Font>>(
 		roots: &'a [MenuRoot],
 		state: &'a MenuState,
 		renderer: &Renderer,
@@ -582,7 +583,7 @@ enum Hit<'a> {
 	PanelItem(ItemGeometry<'a>),
 }
 
-fn layout_panel<'a, Renderer: text::Renderer>(
+fn layout_panel<'a, Renderer: text::Renderer<Font = iced::Font>>(
 	items: &'a [MenuItem],
 	depth: usize,
 	renderer: &Renderer,
@@ -655,7 +656,7 @@ fn layout_panel<'a, Renderer: text::Renderer>(
 	}
 }
 
-fn draw_label<Renderer: text::Renderer>(
+fn draw_label<Renderer: text::Renderer<Font = iced::Font>>(
 	renderer: &mut Renderer,
 	label: &str,
 	bounds: Rectangle,
@@ -680,7 +681,7 @@ fn draw_label<Renderer: text::Renderer>(
 			bounds: Size::new(bounds.width, bounds.height),
 			size: LABEL_SIZE,
 			line_height: text::LineHeight::default(),
-			font: renderer.default_font(),
+			font: MENU_FONT,
 			align_x: horizontal_alignment,
 			align_y: iced::alignment::Vertical::Center,
 			shaping: text::Shaping::Basic,
@@ -692,10 +693,10 @@ fn draw_label<Renderer: text::Renderer>(
 	);
 }
 
-fn measure_label<Renderer: text::Renderer>(
+fn measure_label<Renderer: text::Renderer<Font = iced::Font>>(
 	_renderer: &Renderer,
 	label: &str,
-	font: Renderer::Font,
+	_font: Renderer::Font,
 	line_height: text::LineHeight,
 ) -> f32 {
 	let paragraph = <Renderer::Paragraph as Paragraph>::with_text(text::Text {
@@ -706,7 +707,7 @@ fn measure_label<Renderer: text::Renderer>(
 		),
 		size: LABEL_SIZE,
 		line_height,
-		font,
+		font: MENU_FONT,
 		align_x: text::Alignment::Left,
 		align_y: iced::alignment::Vertical::Center,
 		shaping: text::Shaping::Basic,
