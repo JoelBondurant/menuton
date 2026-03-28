@@ -2,8 +2,6 @@ use iced::advanced::mouse;
 use iced::advanced::text::{self, Paragraph};
 use iced::{Pixels, Point, Rectangle, Size};
 
-use crate::fonts::MENU_FONT;
-
 use super::{MenuItem, MenuRoot, MenuState};
 
 pub const BAR_HEIGHT: f32 = 32.0;
@@ -63,17 +61,18 @@ impl<'a> MenuGeometry<'a> {
 	pub fn new<Renderer: text::Renderer<Font = iced::Font>>(
 		roots: &'a [MenuRoot],
 		state: &'a MenuState,
-		renderer: &Renderer,
+		_renderer: &Renderer,
+		label_font: iced::Font,
 		width: f32,
 	) -> Self {
-		let font = renderer.default_font();
+		let font = label_font;
 		let line_height = text::LineHeight::default();
 
 		let mut x = 0.0;
 		let mut root_geometries = Vec::with_capacity(roots.len());
 
 		for root in roots {
-			let label_width = measure_label(renderer, root.label, font, line_height);
+			let label_width = measure_label(root.label, font, line_height);
 			let item_width = label_width + BAR_ITEM_PADDING_X * 2.0;
 
 			root_geometries.push(RootGeometry {
@@ -114,7 +113,6 @@ impl<'a> MenuGeometry<'a> {
 				let panel = layout_panel(
 					current_items,
 					depth,
-					renderer,
 					font,
 					line_height,
 					Point::new(panel_x, panel_y),
@@ -227,11 +225,10 @@ pub(crate) fn submenu_items<'a>(items: &'a [MenuItem], id: &str) -> Option<&'a [
 	})
 }
 
-fn layout_panel<'a, Renderer: text::Renderer<Font = iced::Font>>(
+fn layout_panel<'a>(
 	items: &'a [MenuItem],
 	depth: usize,
-	renderer: &Renderer,
-	font: Renderer::Font,
+	font: iced::Font,
 	line_height: text::LineHeight,
 	origin: Point,
 ) -> PanelGeometry<'a> {
@@ -243,11 +240,8 @@ fn layout_panel<'a, Renderer: text::Renderer<Font = iced::Font>>(
 			MenuItem::Separator => continue,
 		};
 
-		width = width.max(
-			measure_label(renderer, label, font, line_height)
-				+ PANEL_TEXT_OFFSET * 2.0
-				+ ARROW_GUTTER,
-		);
+		width = width
+			.max(measure_label(label, font, line_height) + PANEL_TEXT_OFFSET * 2.0 + ARROW_GUTTER);
 	}
 
 	let height = items.iter().fold(PANEL_PADDING * 2.0, |height, item| {
@@ -300,13 +294,8 @@ fn layout_panel<'a, Renderer: text::Renderer<Font = iced::Font>>(
 	}
 }
 
-fn measure_label<Renderer: text::Renderer<Font = iced::Font>>(
-	_renderer: &Renderer,
-	label: &str,
-	_font: Renderer::Font,
-	line_height: text::LineHeight,
-) -> f32 {
-	let paragraph = <Renderer::Paragraph as Paragraph>::with_text(text::Text {
+fn measure_label(label: &str, font: iced::Font, line_height: text::LineHeight) -> f32 {
+	let paragraph = <iced::Renderer as text::Renderer>::Paragraph::with_text(text::Text {
 		content: label,
 		bounds: Size::new(
 			f32::INFINITY,
@@ -314,7 +303,7 @@ fn measure_label<Renderer: text::Renderer<Font = iced::Font>>(
 		),
 		size: LABEL_SIZE,
 		line_height,
-		font: MENU_FONT,
+		font,
 		align_x: text::Alignment::Left,
 		align_y: iced::alignment::Vertical::Center,
 		shaping: text::Shaping::Basic,

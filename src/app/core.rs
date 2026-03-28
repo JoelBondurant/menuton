@@ -1,8 +1,8 @@
-use iced::widget::{Space, column, container, row, stack, text};
+use iced::widget::{column, container, row, stack, text, Space};
 use iced::{Alignment, Element, Length, Task, Theme};
 
-use crate::fonts::{DEJAVU_SANS_MONO, MENU_FONT};
-use crate::menu::{MenuBar, MenuItem, MenuMessage, MenuRoot, MenuState};
+use crate::fonts::DEJAVU_SANS_MONO;
+use crate::menu::{MenuBar, MenuFontPolicy, MenuItem, MenuMessage, MenuRoot, MenuState};
 
 const FILE_MENU: &[MenuItem] = &[
 	MenuItem::Action {
@@ -129,7 +129,6 @@ pub fn run() -> iced::Result {
 		.title("menuton")
 		.antialiasing(true)
 		.font(DEJAVU_SANS_MONO)
-		.default_font(MENU_FONT)
 		.theme(theme)
 		.run()
 }
@@ -147,7 +146,9 @@ fn update(demo: &mut Demo, message: Message) -> Task<Message> {
 }
 
 fn view(demo: &Demo) -> Element<'_, Message> {
-	let menu: Element<'_, MenuMessage> = MenuBar::new(MENUS, &demo.menu_state).into();
+	let menu: Element<'_, MenuMessage> = MenuBar::new(MENUS, &demo.menu_state)
+		.font_policy(MenuFontPolicy::SystemWithFallback)
+		.into();
 	let menu = menu.map(Message::Menu);
 
 	let status = text(match demo.last_action {

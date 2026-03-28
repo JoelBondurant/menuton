@@ -4,6 +4,6 @@ mod interaction;
 mod model;
 mod state;
 
-pub use core::{MenuBar, MenuMessage};
+pub use core::{MenuBar, MenuFontPolicy, MenuMessage};
 pub use model::{MenuItem, MenuRoot};
 pub use state::MenuState;

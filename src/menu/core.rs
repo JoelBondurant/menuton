@@ -29,6 +29,13 @@ pub enum MenuMessage {
 	Close,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MenuFontPolicy {
+	Bundled,
+	#[default]
+	SystemWithFallback,
+}
+
 impl MenuState {
 	pub fn update(&mut self, message: MenuMessage) -> Option<&'static str> {
 		match message {
@@ -71,11 +78,38 @@ impl MenuState {
 pub struct MenuBar<'a> {
 	roots: &'a [MenuRoot],
 	state: &'a MenuState,
+	font_policy: MenuFontPolicy,
 }
 
 impl<'a> MenuBar<'a> {
 	pub fn new(roots: &'a [MenuRoot], state: &'a MenuState) -> Self {
-		Self { roots, state }
+		Self {
+			roots,
+			state,
+			font_policy: MenuFontPolicy::SystemWithFallback,
+		}
+	}
+
+	pub fn font_policy(mut self, font_policy: MenuFontPolicy) -> Self {
+		self.font_policy = font_policy;
+		self
+	}
+
+	fn label_font<Renderer: text::Renderer<Font = iced::Font>>(
+		&self,
+		renderer: &Renderer,
+	) -> iced::Font {
+		match self.font_policy {
+			MenuFontPolicy::Bundled => MENU_FONT,
+			MenuFontPolicy::SystemWithFallback => renderer.default_font(),
+		}
+	}
+
+	fn symbol_font(&self) -> iced::Font {
+		match self.font_policy {
+			MenuFontPolicy::Bundled => MENU_FONT,
+			MenuFontPolicy::SystemWithFallback => MENU_FONT,
+		}
 	}
 }
 
@@ -93,7 +127,13 @@ where
 		renderer: &Renderer,
 		limits: &layout::Limits,
 	) -> layout::Node {
-		let geometry = MenuGeometry::new(self.roots, self.state, renderer, limits.max().width);
+		let geometry = MenuGeometry::new(
+			self.roots,
+			self.state,
+			renderer,
+			self.label_font(renderer),
+			limits.max().width,
+		);
 
 		layout::Node::new(limits.resolve(Length::Fill, Length::Shrink, geometry.size()))
 	}
@@ -108,9 +148,17 @@ where
 		cursor: mouse::Cursor,
 		viewport: &Rectangle,
 	) {
+		let label_font = self.label_font(renderer);
+		let symbol_font = self.symbol_font();
 		let widget_state = tree.state.downcast_ref::<WidgetState>();
-		let geometry = MenuGeometry::new(self.roots, self.state, renderer, layout.bounds().width)
-			.with_origin(Point::new(layout.bounds().x, layout.bounds().y));
+		let geometry = MenuGeometry::new(
+			self.roots,
+			self.state,
+			renderer,
+			label_font,
+			layout.bounds().width,
+		)
+		.with_origin(Point::new(layout.bounds().x, layout.bounds().y));
 
 		renderer.fill_quad(
 			renderer::Quad {
@@ -146,6 +194,7 @@ where
 				text_color(),
 				viewport,
 				LabelAlignment::Bar,
+				label_font,
 			);
 		}
 
@@ -210,6 +259,7 @@ where
 							text_color(),
 							viewport,
 							LabelAlignment::Panel,
+							label_font,
 						);
 
 						if matches!(item.kind, ItemKind::Submenu { .. }) {
@@ -223,6 +273,7 @@ where
 								if hovered { text_color() } else { text_muted() },
 								viewport,
 								LabelAlignment::Arrow,
+								symbol_font,
 							);
 						}
 					}
@@ -243,8 +294,14 @@ where
 		_viewport: &Rectangle,
 	) {
 		let widget_state = tree.state.downcast_mut::<WidgetState>();
-		let geometry = MenuGeometry::new(self.roots, self.state, renderer, layout.bounds().width)
-			.with_origin(Point::new(layout.bounds().x, layout.bounds().y));
+		let geometry = MenuGeometry::new(
+			self.roots,
+			self.state,
+			renderer,
+			self.label_font(renderer),
+			layout.bounds().width,
+		)
+		.with_origin(Point::new(layout.bounds().x, layout.bounds().y));
 
 		match event {
 			Event::Mouse(mouse::Event::CursorMoved { .. }) => {
@@ -462,8 +519,14 @@ where
 		_viewport: &Rectangle,
 		renderer: &Renderer,
 	) -> mouse::Interaction {
-		let geometry = MenuGeometry::new(self.roots, self.state, renderer, layout.bounds().width)
-			.with_origin(Point::new(layout.bounds().x, layout.bounds().y));
+		let geometry = MenuGeometry::new(
+			self.roots,
+			self.state,
+			renderer,
+			self.label_font(renderer),
+			layout.bounds().width,
+		)
+		.with_origin(Point::new(layout.bounds().x, layout.bounds().y));
 
 		if geometry.hit_test(cursor).is_some() {
 			mouse::Interaction::Pointer
@@ -498,6 +561,7 @@ fn draw_label<Renderer: text::Renderer<Font = iced::Font>>(
 	color: Color,
 	viewport: &Rectangle,
 	alignment: LabelAlignment,
+	font: iced::Font,
 ) {
 	let horizontal_alignment = match alignment {
 		LabelAlignment::Arrow => text::Alignment::Center,
@@ -516,7 +580,7 @@ fn draw_label<Renderer: text::Renderer<Font = iced::Font>>(
 			bounds: Size::new(bounds.width, bounds.height),
 			size: LABEL_SIZE,
 			line_height: text::LineHeight::default(),
-			font: MENU_FONT,
+			font,
 			align_x: horizontal_alignment,
 			align_y: iced::alignment::Vertical::Center,
 			shaping: text::Shaping::Basic,
