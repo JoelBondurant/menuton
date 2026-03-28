@@ -1,4 +1,4 @@
-use iced::widget::{column, container, row, stack, text, Space};
+use iced::widget::{Space, column, container, row, stack, text};
 use iced::{Alignment, Element, Length, Task, Theme};
 
 use crate::fonts::DEJAVU_SANS_MONO;

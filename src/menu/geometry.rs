@@ -208,6 +208,11 @@ impl<'a> MenuGeometry<'a> {
 
 		None
 	}
+
+	pub fn contains(&self, cursor: mouse::Cursor) -> bool {
+		cursor.is_over(self.bar_bounds)
+			|| self.panels.iter().any(|panel| cursor.is_over(panel.bounds))
+	}
 }
 
 pub(crate) fn root_by_id<'a>(roots: &'a [MenuRoot], id: &str) -> Option<&'a MenuRoot> {

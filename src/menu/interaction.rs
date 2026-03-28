@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use iced::keyboard::{self, key};
 
 use super::geometry::{root_by_id, submenu_items};
@@ -8,6 +10,7 @@ pub(crate) struct WidgetState {
 	pub keyboard_navigation: bool,
 	pub focus_root: Option<&'static str>,
 	pub focus_path: Vec<&'static str>,
+	pub pending_close_at: Option<Instant>,
 }
 
 impl WidgetState {
@@ -15,6 +18,11 @@ impl WidgetState {
 		self.keyboard_navigation = false;
 		self.focus_root = None;
 		self.focus_path.clear();
+		self.pending_close_at = None;
+	}
+
+	pub fn cancel_pending_close(&mut self) -> bool {
+		self.pending_close_at.take().is_some()
 	}
 
 	pub fn sync(&mut self, roots: &[MenuRoot], menu_state: &MenuState) {

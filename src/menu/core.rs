@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use iced::Event;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::mouse;
@@ -6,6 +8,7 @@ use iced::advanced::text::{self};
 use iced::advanced::widget::{Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::keyboard;
+use iced::window;
 use iced::{Background, Border, Color, Element, Length, Point, Rectangle, Shadow, Size, Vector};
 
 use crate::colors::{BG_PRIMARY, BORDER_PRIMARY, SHADOW_PRIMARY, TEXT_PRIMARY, TEXT_SECONDARY};
@@ -79,6 +82,7 @@ pub struct MenuBar<'a> {
 	roots: &'a [MenuRoot],
 	state: &'a MenuState,
 	font_policy: MenuFontPolicy,
+	close_delay: Duration,
 }
 
 impl<'a> MenuBar<'a> {
@@ -87,11 +91,17 @@ impl<'a> MenuBar<'a> {
 			roots,
 			state,
 			font_policy: MenuFontPolicy::SystemWithFallback,
+			close_delay: Duration::from_millis(400),
 		}
 	}
 
 	pub fn font_policy(mut self, font_policy: MenuFontPolicy) -> Self {
 		self.font_policy = font_policy;
+		self
+	}
+
+	pub fn close_delay(mut self, close_delay: Duration) -> Self {
+		self.close_delay = close_delay;
 		self
 	}
 
@@ -110,6 +120,32 @@ impl<'a> MenuBar<'a> {
 			MenuFontPolicy::Bundled => MENU_FONT,
 			MenuFontPolicy::SystemWithFallback => MENU_FONT,
 		}
+	}
+
+	fn cancel_pending_close(
+		&self,
+		widget_state: &mut WidgetState,
+		shell: &mut Shell<'_, MenuMessage>,
+	) {
+		if widget_state.cancel_pending_close() {
+			shell.request_redraw();
+		}
+	}
+
+	fn schedule_close_if_needed(
+		&self,
+		widget_state: &mut WidgetState,
+		shell: &mut Shell<'_, MenuMessage>,
+		now: Instant,
+	) {
+		if widget_state.keyboard_navigation || self.state.open_root().is_none() {
+			self.cancel_pending_close(widget_state, shell);
+			return;
+		}
+
+		let close_at = now + self.close_delay;
+		widget_state.pending_close_at = Some(close_at);
+		shell.request_redraw_at(window::RedrawRequest::At(close_at));
 	}
 }
 
@@ -310,6 +346,14 @@ where
 					shell.request_redraw();
 				}
 
+				let menu_contains_cursor = geometry.contains(cursor);
+
+				if menu_contains_cursor {
+					self.cancel_pending_close(widget_state, shell);
+				} else {
+					self.schedule_close_if_needed(widget_state, shell, Instant::now());
+				}
+
 				if let Some(hit) = geometry.hit_test(cursor) {
 					match hit {
 						Hit::Root(root) if self.state.open_root().is_some() => {
@@ -339,7 +383,7 @@ where
 							shell.capture_event();
 						}
 					}
-				} else if self.state.open_root().is_some() && cursor.is_over(layout.bounds()) {
+				} else if self.state.open_root().is_some() && geometry.contains(cursor) {
 					shell.publish(MenuMessage::TrimPath(0));
 					shell.capture_event();
 				}
@@ -348,6 +392,10 @@ where
 				if widget_state.keyboard_navigation {
 					widget_state.keyboard_navigation = false;
 					shell.request_redraw();
+				}
+
+				if geometry.contains(cursor) {
+					self.cancel_pending_close(widget_state, shell);
 				}
 
 				if let Some(hit) = geometry.hit_test(cursor) {
@@ -392,11 +440,28 @@ where
 					shell.capture_event();
 				}
 			}
+			Event::Window(window::Event::RedrawRequested(now)) => {
+				if let Some(close_at) = widget_state.pending_close_at {
+					if widget_state.keyboard_navigation || self.state.open_root().is_none() {
+						widget_state.pending_close_at = None;
+					} else if geometry.contains(cursor) {
+						widget_state.pending_close_at = None;
+					} else if *now >= close_at {
+						widget_state.clear();
+						shell.publish(MenuMessage::Close);
+						shell.capture_event();
+					} else {
+						shell.request_redraw_at(window::RedrawRequest::At(close_at));
+					}
+				}
+			}
 			Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
 				let shift = modifiers.shift();
 
 				match key.as_ref() {
 					key if is_menu_activation(&key, *modifiers) => {
+						self.cancel_pending_close(widget_state, shell);
+
 						if self.state.open_root().is_some() {
 							widget_state.clear();
 							shell.publish(MenuMessage::Close);
@@ -417,6 +482,7 @@ where
 					}
 					key if navigation_direction(&key, shift).is_some() => {
 						if let Some(open_root) = self.state.open_root() {
+							self.cancel_pending_close(widget_state, shell);
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
 							let direction = navigation_direction(&key, shift)
@@ -434,6 +500,7 @@ where
 					}
 					keyboard::key::Key::Named(keyboard::key::Named::ArrowRight) => {
 						if let Some(open_root) = self.state.open_root() {
+							self.cancel_pending_close(widget_state, shell);
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
 
@@ -458,6 +525,7 @@ where
 					}
 					keyboard::key::Key::Named(keyboard::key::Named::ArrowLeft) => {
 						if let Some(open_root) = self.state.open_root() {
+							self.cancel_pending_close(widget_state, shell);
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
 
@@ -479,6 +547,7 @@ where
 					}
 					keyboard::key::Key::Named(keyboard::key::Named::Enter) => {
 						if self.state.open_root().is_some() {
+							self.cancel_pending_close(widget_state, shell);
 							widget_state.keyboard_navigation = true;
 							widget_state.sync(self.roots, self.state);
 
